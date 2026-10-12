@@ -59,8 +59,9 @@ jobs:
           conclusion=$(gh run view "$BUILD_RUN" --repo "$GITHUB_REPOSITORY" --json conclusion --jq '.conclusion')
           branch=$(gh run view "$BUILD_RUN" --repo "$GITHUB_REPOSITORY" --json headBranch --jq '.headBranch')
           workflow=$(gh run view "$BUILD_RUN" --repo "$GITHUB_REPOSITORY" --json workflowName --jq '.workflowName')
+          build_sha=$(gh run view "$BUILD_RUN" --repo "$GITHUB_REPOSITORY" --json headSha --jq '.headSha')
           if [[ "$conclusion" != "success" || "$branch" != "$GITHUB_REF_NAME" ||
-                "$workflow" != "Veylor V0.3.3 preview builds" ]]; then
+                "$workflow" != "Veylor V0.3.3 preview builds" || "$build_sha" != "$GITHUB_SHA" ]]; then
             echo "::error::Requires a successful matching V0.3.3 preview workflow from this branch"
             exit 1
           fi
