@@ -3,11 +3,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:veylor/main.dart';
 
 void main() {
-  testWidgets('Veylor app starts with a scaffold', (tester) async {
-    await tester.pumpWidget(const VeylorApp());
-    // The secure storage plugin is platform-native and may not complete in a widget test.
-    // Verify the boot shell without waiting for the indeterminate loading animation.
+  testWidgets('renders login without native secure-storage dependency', (tester) async {
+    await tester.pumpWidget(const VeylorApp(sessionRestorationEnabled:false));
     expect(find.byType(MaterialApp), findsOneWidget);
     expect(find.byType(Scaffold), findsOneWidget);
+    expect(find.text('Bem-vindo ao Veylor'), findsOneWidget);
+    expect(find.textContaining('Servidor:'), findsOneWidget);
+    expect(find.byType(TextField), findsNWidgets(2));
   });
 }

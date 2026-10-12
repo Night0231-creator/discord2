@@ -31,7 +31,8 @@ class Api {
   }
 }
 class VeylorApp extends StatelessWidget {
-  const VeylorApp({super.key});
+  const VeylorApp({super.key, this.sessionRestorationEnabled=true});
+  final bool sessionRestorationEnabled;
   @override
   Widget build(BuildContext context) => MaterialApp(
     title:'Veylor 2.0',debugShowCheckedModeBanner:false,
@@ -41,10 +42,11 @@ class VeylorApp extends StatelessWidget {
       inputDecorationTheme:InputDecorationTheme(
         filled:true,fillColor:sidebar,
         border:OutlineInputBorder(borderRadius:BorderRadius.circular(12),borderSide:BorderSide.none))),
-    home:const Home());
+    home:Home(sessionRestorationEnabled:sessionRestorationEnabled));
 }
 class Home extends StatefulWidget {
-  const Home({super.key});
+  const Home({super.key, this.sessionRestorationEnabled=true});
+  final bool sessionRestorationEnabled;
   @override
   State<Home> createState()=>_HomeState();
 }
@@ -61,7 +63,7 @@ class _HomeState extends State<Home> {
   List<Map<String,dynamic>> servers=[],channels=[],messages=[];
   int cursor=0;
   @override
-  void initState(){super.initState();restoreSession();}
+  void initState(){super.initState();if(widget.sessionRestorationEnabled){restoreSession();}else{restoring=false;}}
   @override
   void dispose() {
     polling?.cancel();retrySocket?.cancel();socket?.close();
