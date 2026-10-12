@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'client_stability.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -25,14 +26,26 @@ class Api {
       if(token != null) req.headers.set('Authorization','Bearer ' + token!);
       if(body != null) req.write(jsonEncode(body));
       final response = await req.close().timeout(const Duration(seconds: 15));
-      final decoded = jsonDecode(await utf8.decoder.bind(response).join()) as Map<String,dynamic>;
-      if(response.statusCode >= 400) throw Exception(decoded['error'] ?? 'Erro HTTP');
+      final decoded = jsonDecode(
+        await utf8.decoder.bind(response).join().timeout(const Duration(seconds:15))
+      ) as Map<String,dynamic>;
+      if(response.statusCode >= 400) {
+        throw ApiException(response.statusCode, (decoded['error'] ?? 'Erro HTTP').toString());
+      }
       return decoded;
     } finally {
       client.close(force:true);
     }
   }
 }
+class ApiException implements Exception {
+  const ApiException(this.statusCode,this.message);
+  final int statusCode;
+  final String message;
+  @override
+  String toString()=>message;
+}
+
 class VeylorApp extends StatelessWidget {
   const VeylorApp({super.key, this.sessionRestorationEnabled=true});
   final bool sessionRestorationEnabled;
@@ -58,6 +71,10 @@ class _HomeState extends State<Home> {
   final user=TextEditingController(),password=TextEditingController(),message=TextEditingController();
   Timer? polling,retrySocket;
   WebSocket? socket;
+  final backoff=RetryBackoff();
+  PendingMessage? pendingMessage;
+  bool socketConnecting=false,refreshing=false,refreshAgain=false,sending=false;
+  int socketEpoch=0;
   final storage=const FlutterSecureStorage();
   bool restoring=true,realtime=false,checkingUpdate=false,sessionMoved=false;
   String? nick,serverId,channelId,dmId,error;
@@ -69,7 +86,7 @@ class _HomeState extends State<Home> {
   void initState(){super.initState();if(widget.sessionRestorationEnabled){restoreSession();}else{restoring=false;}}
   @override
   void dispose() {
-    polling?.cancel();retrySocket?.cancel();socket?.close();
+    stopRealtime();
     user.dispose();password.dispose();message.dispose();super.dispose();
   }
   Future<void> restoreSession() async {
@@ -89,9 +106,16 @@ class _HomeState extends State<Home> {
         nick=(profile['user'] as Map<String,dynamic>)['username'] as String;
         await loadServers();await loadDms();startRealtime();
       }
+    }on ApiException catch(e){
+      api.token=null;
+      if(e.statusCode==401){
+        try{await storage.delete(key:'veylor_session');}catch(_){}
+      }else{
+        error='Servidor indisponível. Sua sessão foi preservada; tente reconectar.';
+      }
     }catch(_){
       api.token=null;
-      try{await storage.delete(key:'veylor_session');}catch(_){}
+      error='Sem conexão. Sua sessão foi preservada; tente reconectar.';
     }finally{
       if(mounted){
         setState(()=>restoring=false);
@@ -108,7 +132,10 @@ class _HomeState extends State<Home> {
     checkingUpdate=true;
     try {
       final isAndroid=Platform.isAndroid;
-      final response=await api.request('GET',isAndroid?'/api/updates/android':'/api/updates/windows');
+      // Never send bearer sessions or use untrusted custom servers for updates.
+      final updatesApi=Api(newVeylorApi);
+      final response=await updatesApi.request('GET',
+          isAndroid?'/api/updates/android':'/api/updates/windows');
       final AppUpdateInfo update=isAndroid
           ? AndroidUpdate.fromJson(response) : WindowsUpdate.fromJson(response);
       final installed=await PackageInfo.fromPlatform();
@@ -167,6 +194,8 @@ class _HomeState extends State<Home> {
     try {
       final normalized=validateApiEndpoint(address);
       if(normalized!=api.baseUrl){
+        stopRealtime();
+        pendingMessage=null;
         api.token=null;
         await storage.delete(key:'veylor_session');
         await storage.write(key:'veylor_api_url',value:normalized);
@@ -174,45 +203,78 @@ class _HomeState extends State<Home> {
       }
     }catch(e){if(mounted)setState(()=>error=e.toString());}
   }
-  void startRealtime(){
+  void stopRealtime(){
+    socketEpoch++;
     polling?.cancel();
-    polling=Timer.periodic(const Duration(seconds:30),(_){refresh();loadDms();});
+    retrySocket?.cancel();
+    socket?.close();
+    socket=null;
+    socketConnecting=false;
+    backoff.reset();
+  }
+  void scheduleReconnect(int epoch){
+    if(!mounted||epoch!=socketEpoch||api.token==null)return;
+    retrySocket?.cancel();
+    retrySocket=Timer(backoff.nextDelay(),connectSocket);
+  }
+  void startRealtime(){
+    stopRealtime();
+    if(api.token==null)return;
+    // Polling is a fallback if WebSocket events are lost during sleep/outage.
+    polling=Timer.periodic(const Duration(seconds:30),(_){
+      refresh();
+      loadDms().catchError((Object _){});
+    });
     connectSocket();
   }
   Future<void> connectSocket() async {
-    final token=api.token;
-    if(token==null||socket!=null)return;
-    try {
+    final token=api.token,epoch=socketEpoch;
+    if(token==null||socket!=null||socketConnecting||!mounted)return;
+    socketConnecting=true;
+    try{
       final url=Uri.parse(api.baseUrl);
-      final wsUrl=url.replace(scheme:url.scheme=='https'?'wss':'ws',path:'/api/realtime',query:null);
+      final wsUrl=url.replace(scheme:url.scheme=='https'?'wss':'ws',
+        path:'/api/realtime',query:null,fragment:null);
       final ws=await WebSocket.connect(wsUrl.toString(),
-        headers:{HttpHeaders.authorizationHeader:'Bearer '+token});
-      if(!mounted||api.token!=token){ws.close();return;}
+        headers:{HttpHeaders.authorizationHeader:'Bearer $token'})
+        .timeout(const Duration(seconds:12));
+      ws.pingInterval=const Duration(seconds:20);
+      if(!mounted||epoch!=socketEpoch||api.token!=token){
+        await ws.close();
+        return;
+      }
       socket=ws;
+      backoff.reset();
+      retrySocket?.cancel();
       setState(()=>realtime=true);
       ws.listen((data){
         try {
           final event=jsonDecode(data as String) as Map<String,dynamic>;
           final type=event['type'];
+          if(type=='connected'){
+            refresh(); // Recover messages missed while this client was offline.
+            loadDms().catchError((Object _){});
+          }
           if(type=='channel.message'&&event['channel_id']==channelId&&dmId==null)refresh();
           if(type=='dm.message'&&event['thread_id']==dmId)refresh();
-          if(type=='dm.updated'||type=='dm.message')loadDms();
-          if(type=='server.updated'||type=='server.removed')loadServers();
+          if(type=='dm.updated'||type=='dm.message')loadDms().catchError((Object _){});
+          if(type=='server.updated'||type=='server.removed')loadServers().catchError((Object _){});
         }catch(_){}
-      },onError:(_){},onDone:(){
-        if(identical(socket,ws))socket=null;
+      },onError:(Object _){
+        ws.close();
+      },onDone:(){
+        if(!identical(socket,ws))return;
+        socket=null;
         if(mounted)setState(()=>realtime=false);
-        if(api.token!=null&&mounted){
-          retrySocket?.cancel();
-          retrySocket=Timer(const Duration(seconds:4),connectSocket);
-        }
+        scheduleReconnect(epoch);
       },cancelOnError:false);
     }catch(_){
-      if(mounted)setState(()=>realtime=false);
-      if(api.token!=null&&mounted){
-        retrySocket?.cancel();
-        retrySocket=Timer(const Duration(seconds:6),connectSocket);
+      if(epoch==socketEpoch){
+        if(mounted)setState(()=>realtime=false);
+        scheduleReconnect(epoch);
       }
+    }finally{
+      if(epoch==socketEpoch)socketConnecting=false;
     }
   }
   Future<void> loadDms() async {
@@ -299,6 +361,7 @@ class _HomeState extends State<Home> {
     await loadChannels();
   }
   Future<void> loadChannels() async {
+    final previousChannel=channelId;
     channels=[];
     if(serverId!=null){
       final r=await api.request('GET','/api/servers/'+serverId!+'/channels');
@@ -309,32 +372,57 @@ class _HomeState extends State<Home> {
       for(final c in channels){if(c['type']=='text'){channelId=c['id'] as String;break;}}
     }
     // Preserve currently displayed messages when membership/channel metadata changes.
-    if(dmId==null&&(messages.isEmpty||!channels.any((c)=>c['id']==channelId))) {
+    if(dmId==null&&(messages.isEmpty||previousChannel!=channelId)) {
       cursor=0;messages=[];
       await refresh();
     }
     if(mounted)setState((){});
   }
   Future<void> refresh() async {
-    final id=dmId??channelId;
-    final isDm=dmId!=null;
-    if(id==null||api.token==null)return;
-    try {
-      final route=isDm?'/api/dms/'+id+'/messages':'/api/channels/'+id+'/messages';
-      final r=await api.request('GET',route+'?after='+cursor.toString());
-      if(!mounted||id!=(isDm?dmId:channelId))return;
-      final rows=List<Map<String,dynamic>>.from(r['messages'] as List);
-      if(rows.isNotEmpty)setState((){messages.addAll(rows);cursor=rows.last['id'] as int;});
-    }catch(e){if(mounted)setState(()=>error=e.toString());}
+    if(refreshing){refreshAgain=true;return;}
+    refreshing=true;
+    try{
+      do{
+        refreshAgain=false;
+        final id=dmId??channelId,isDm=dmId!=null;
+        if(id==null||api.token==null)break;
+        try{
+          // Fetch every page, not only the first 100 messages after an outage.
+          for(var pages=0;pages<50;pages++){
+            final route=isDm?'/api/dms/$id/messages':'/api/channels/$id/messages';
+            final result=await api.request('GET','$route?after=$cursor');
+            if(!mounted||api.token==null||id!=(isDm?dmId:channelId))break;
+            final rows=List<Map<String,dynamic>>.from(result['messages'] as List);
+            if(rows.isEmpty)break;
+            setState((){
+              messages=mergeMessagePages(messages,rows);
+              cursor=messages.last['id'] as int;
+            });
+            if(rows.length<100)break;
+          }
+        }catch(e){if(mounted)setState(()=>error=e.toString());}
+      }while(refreshAgain&&mounted);
+    }finally{refreshing=false;}
   }
   Future<void> send() async {
+    if(sending)return;
     final text=message.text.trim();
     if(text.isEmpty||(dmId==null&&channelId==null))return;
-    await perform(() async {
-      final route=dmId!=null?'/api/dms/'+dmId!+'/messages':'/api/channels/'+channelId!+'/messages';
-      await api.request('POST',route,{'content':text});
-      message.clear();await refresh();
-    });
+    final route=dmId!=null?'/api/dms/'+dmId!+'/messages':'/api/channels/'+channelId!+'/messages';
+    final previous=pendingMessage;
+    final pending=previous!=null&&previous.matches(route,text)
+      ?previous:PendingMessage(route:route,content:text,nonce:createClientNonce());
+    pendingMessage=pending;
+    sending=true;
+    try{
+      await perform(() async {
+        await api.request('POST',route,{'content':text,'client_nonce':pending.nonce});
+        // Never delete anything typed while a slow request was in flight.
+        if(message.text.trim()==text)message.clear();
+        if(identical(pendingMessage,pending))pendingMessage=null;
+        await refresh();
+      });
+    }finally{sending=false;}
   }
   Future<String?> prompt(String title,String hint) async {
     final controller=TextEditingController();
@@ -439,9 +527,9 @@ class _HomeState extends State<Home> {
         leading:const CircleAvatar(backgroundColor:accent,child:Icon(Icons.person)),
         title:Text(nick??'Conta'),subtitle:Text(realtime?'V0.3.2 • Online':'V0.3.2 • Reconectando'),
         trailing:IconButton(tooltip:'Sair',icon:const Icon(Icons.logout),onPressed:() async {
-          polling?.cancel();retrySocket?.cancel();
+          stopRealtime();
           try{await api.request('POST','/api/logout');}catch(_){}
-          api.token=null;socket?.close();socket=null;
+          api.token=null;pendingMessage=null;
           try{await storage.delete(key:'veylor_session');}catch(_){}
           if(mounted)setState((){nick=null;serverId=null;dmId=null;realtime=false;servers=[];channels=[];dms=[];messages=[];});
         })))
@@ -494,6 +582,10 @@ class _HomeState extends State<Home> {
         Text(signup?'Criar conta Veylor':'Bem-vindo ao Veylor',
           textAlign:TextAlign.center,style:const TextStyle(fontSize:27,fontWeight:FontWeight.bold)),
         const SizedBox(height:14),
+        if(error!=null&&error!.startsWith('Sem conexão')||
+            error!=null&&error!.startsWith('Servidor indisponível'))
+          TextButton.icon(onPressed:restoreSession,
+            icon:const Icon(Icons.refresh),label:const Text('Tentar reconectar')),
         TextButton.icon(
           onPressed:busy?null:configureBackend,
           icon:const Icon(Icons.dns_outlined,size:17),
