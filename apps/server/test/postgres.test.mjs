@@ -61,11 +61,11 @@ test('Postgres: accounts, membership, DMs, realtime, persistence across restart'
   const msg=await api('/api/channels/'+textChannel+'/messages','POST',alice.token,{content:'saved-postgres'});
   assert.equal(msg.status,201);
   const nonce='abcd1234abcd1234abcd1234abcd1234';
-  const once=await api('/api/channels/'+textChannel+'/messages','POST',alice.token,{content:'retry-safe',client_nonce:nonce});
+  const onceMsg=await api('/api/channels/'+textChannel+'/messages','POST',alice.token,{content:'retry-safe',client_nonce:nonce});
   const repeated=await api('/api/channels/'+textChannel+'/messages','POST',alice.token,{content:'retry-safe',client_nonce:nonce});
-  assert.equal(once.status,201);
+  assert.equal(onceMsg.status,201);
   assert.equal(repeated.status,200);
-  assert.equal(repeated.message.id,once.message.id);
+  assert.equal(repeated.message.id,onceMsg.message.id);
   assert.equal(repeated.duplicate,true);
   assert.equal((await api('/api/channels/'+textChannel+'/messages','POST',alice.token,{content:'other payload',client_nonce:nonce})).status,409);
   const read=await api('/api/channels/'+textChannel+'/messages','GET',bob.token);
