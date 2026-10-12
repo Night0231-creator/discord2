@@ -53,3 +53,10 @@ Para conversar entre dispositivos: execute a API Node num host compartilhado e c
 Se precisar testar via HTTP na LAN, a aplicação deve ser recompilada explicitamente com `--dart-define=ALLOW_INSECURE_DEV_API=true`, e a plataforma pode exigir configuração de tráfego não criptografado. Não utilize isso em produção.
 
 O iOS exige Mac/Xcode e assinatura e **não** faz parte destes 3 pacotes.
+
+## Atualizações de aplicativo Android (V0.2.1 beta)
+
+O Veylor V0.2.1+3 verifica automaticamente a versão publicada quando inicia e permite verificar manualmente no login e em **Verificar atualização** na barra lateral.
+A API fornece apenas metadados em `GET /api/updates/android`. O manifesto em `apps/server/mobile-release.json` aponta inicialmente para o último APK **testado** da V0.2.0+2. Não aponte o manifesto para novas versões antes de os builds passarem pelos testes.
+
+**Limitações reais:** o APK está em um repositório privado do GitHub. É necessário acesso ao repositório para baixar os artefatos e a instalação é manual via sistema Android. Chaves de assinatura de builds debug podem mudar a cada execução do CI, impedindo instalar por cima da versão antiga. Para distribuição estável e upgrades preservando sessão, precisamos criar uma assinatura de release permanente e segura, armazenada como segredo de CI (nunca em GitHub público). A versão atual **não baixa e instala automaticamente** o APK.
