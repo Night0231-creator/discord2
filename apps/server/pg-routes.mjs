@@ -1,6 +1,6 @@
 import {
   one,rows,query,randomUUID,memberRole,requireAdmin,threadFor,
-  checkedMessage,afterCursor,body,limit,fail,json,now
+  checkedMessage,checkedNonce,afterCursor,body,limit,fail,json,now
 } from './pg-common.mjs';
 import {notifyUser,notifyServer} from './pg-realtime.mjs';
 
@@ -39,16 +39,27 @@ export async function extraRoutes(req,res,user,route,method,url){
       json(res,200,{messages:messages.map(r=>({...r,id:Number(r.id)}))});return true;
     }
     limit(req,'message',120);
-    const content=checkedMessage((await body(req)).content),created_at=now();
-    const saved=await one(
-      'INSERT INTO direct_messages(thread_id,author_id,content,created_at) VALUES($1,$2,$3,$4) RETURNING id',
-      thread.id,user.id,content,created_at);
-    const other=thread.user_a===user.id?thread.user_b:thread.user_a;
-    await Promise.all([
-      notifyUser(other,{type:'dm.message',thread_id:thread.id}),
-      notifyUser(user.id,{type:'dm.message',thread_id:thread.id})
-    ]);
-    json(res,201,{message:{id:Number(saved.id),username:user.username,content,created_at}});return true;
+    const payload=await body(req);
+    const content=checkedMessage(payload.content),nonce=checkedNonce(payload.client_nonce);
+    const created_at=now();
+    const inserted=await one(
+      'INSERT INTO direct_messages(thread_id,author_id,content,created_at,client_nonce) VALUES($1,$2,$3,$4,$5) ON CONFLICT (thread_id,author_id,client_nonce) DO NOTHING RETURNING id,content,created_at',
+      thread.id,user.id,content,created_at,nonce);
+    const record=inserted??await one(
+      'SELECT id,content,created_at FROM direct_messages WHERE thread_id=$1 AND author_id=$2 AND client_nonce=$3',
+      thread.id,user.id,nonce);
+    if(!record)throw fail(503,'Não foi possível confirmar a mensagem');
+    if(record.content!==content)throw fail(409,'Identificador já usado em outra mensagem');
+    if(inserted){
+      const other=thread.user_a===user.id?thread.user_b:thread.user_a;
+      await Promise.all([
+        notifyUser(other,{type:'dm.message',thread_id:thread.id}),
+        notifyUser(user.id,{type:'dm.message',thread_id:thread.id})
+      ]);
+    }
+    json(res,inserted?201:200,{message:{
+      id:Number(record.id),username:user.username,content:record.content,created_at:record.created_at
+    },duplicate:!inserted});return true;
   }
   const members=/^\/api\/servers\/([a-f0-9-]+)\/members$/.exec(route);
   if(members&&method==='GET'){
