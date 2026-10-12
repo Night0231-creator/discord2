@@ -41,4 +41,6 @@ jobs:
           node-version: '22'
       - run: npm install --no-audit --no-fund
         working-directory: apps/server
+      - run: node --check apps/server/scripts/import-sqlite.mjs
+      - run: node --test apps/server/test/import.test.mjs
       - run: node --test apps/server/test/postgres.test.mjs
