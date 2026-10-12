@@ -23,6 +23,10 @@ CREATE TABLE IF NOT EXISTS members (server_id TEXT NOT NULL REFERENCES servers(i
 CREATE TABLE IF NOT EXISTS channels (id TEXT PRIMARY KEY, server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE, name TEXT NOT NULL, type TEXT NOT NULL CHECK(type IN ('text','voice')));
 CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE, author_id TEXT NOT NULL REFERENCES users(id), content TEXT NOT NULL, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS invites (code TEXT PRIMARY KEY, server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE, created_by TEXT NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL); `);
+// Non-destructive migration for existing local SQLite installations.
+if(!db.prepare('PRAGMA table_info(messages)').all().some(c=>c.name==='client_nonce'))
+  db.exec('ALTER TABLE messages ADD COLUMN client_nonce TEXT');
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS messages_nonce_idx ON messages(channel_id,author_id,client_nonce)');
 const now = () => new Date().toISOString();
 const sha256 = value => createHash('sha256').update(value).digest('hex');
 const passwordHash = password => {
@@ -209,13 +213,21 @@ export const app = http.createServer(async (req,res) => {
         return json(res,200,{messages:rows});
       }
       limit(req,'message',120);
-      const {content}=await requestBody(req);
+      const payload=await requestBody(req);
+      const {content}=payload,nonce=payload.client_nonce??null;
       if (typeof content!=='string' || content.trim().length===0 || content.length>4000)
         throw fail(400,'Mensagem inválida (máximo 4000 caracteres)');
-      const result=db.prepare('INSERT INTO messages(channel_id,author_id,content,created_at) VALUES (?,?,?,?)')
-        .run(channel.id,user.id,content.trim(),now());
-      v02.notifyChannel(channel.id, channel.server_id);
-      return json(res,201,{message:{id:Number(result.lastInsertRowid),content:content.trim(),username:user.username,created_at:now()}});
+      if (nonce!==null&&(typeof nonce!=='string'||!/^[a-f0-9]{32}$/.test(nonce)))
+        throw fail(400,'Identificador de mensagem inválido');
+      const created_at=now(),body=content.trim();
+      const inserted=db.prepare('INSERT INTO messages(channel_id,author_id,content,created_at,client_nonce) VALUES (?,?,?,?,?) ON CONFLICT(channel_id,author_id,client_nonce) DO NOTHING RETURNING id,content,created_at')
+        .get(channel.id,user.id,body,created_at,nonce);
+      const record=inserted??db.prepare('SELECT id,content,created_at FROM messages WHERE channel_id=? AND author_id=? AND client_nonce=?')
+        .get(channel.id,user.id,nonce);
+      if(!record)throw fail(503,'Não foi possível confirmar a mensagem');
+      if(record.content!==body)throw fail(409,'Identificador já usado em outra mensagem');
+      if(inserted)v02.notifyChannel(channel.id, channel.server_id);
+      return json(res,inserted?201:200,{message:{id:Number(record.id),content:record.content,username:user.username,created_at:record.created_at},duplicate:!inserted});
     }
     if (method==='POST' && pathname==='/api/media/token') {
       const {channel_id}=await requestBody(req);

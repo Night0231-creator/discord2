@@ -67,6 +67,12 @@ export const threadFor=async(uid,id)=>{
   if(t.user_a!==uid&&t.user_b!==uid)throw fail(403,'Conversa privada');
   return t;
 };
+export const checkedNonce=value=>{
+  if(value===undefined||value===null)return null;
+  if(typeof value!=='string'||!/^[a-f0-9]{32}$/.test(value))
+    throw fail(400,'Identificador de mensagem inválido');
+  return value;
+};
 export const checkedMessage=content=>{
   if(typeof content!=='string'||content.trim().length===0||content.length>4000)
     throw fail(400,'Mensagem inválida (máximo 4000 caracteres)');

@@ -3,7 +3,7 @@ import {readFileSync} from 'node:fs';
 import {
   one,rows,query,transaction,randomUUID,randomBytes,sha,now,fail,json,body,
   passwordHash,passwordMatch,createSession,sessionUser,memberRole,requireAdmin,
-  createServer,channelFor,checkedMessage,afterCursor,limit,mediaToken
+  createServer,channelFor,checkedMessage,checkedNonce,afterCursor,limit,mediaToken
 } from './pg-common.mjs';
 import {pool,ensureSchema} from './pg-db.mjs';
 import {attachRealtime,disconnectToken,notifyServer,notifyChannel} from './pg-realtime.mjs';
@@ -108,11 +108,21 @@ export const app=http.createServer(async(req,res)=>{
         return json(res,200,{messages:messages.map(x=>({...x,id:Number(x.id)}))});
       }
       limit(req,'message',120);
-      const content=checkedMessage((await body(req)).content),created_at=now();
-      const result=await one('INSERT INTO messages(channel_id,author_id,content,created_at) VALUES($1,$2,$3,$4) RETURNING id',
-        channel.id,user.id,content,created_at);
-      await notifyChannel(channel.id,channel.server_id);
-      return json(res,201,{message:{id:Number(result.id),content,created_at,username:user.username}});
+      const payload=await body(req);
+      const content=checkedMessage(payload.content),nonce=checkedNonce(payload.client_nonce);
+      const created_at=now();
+      const inserted=await one(
+        'INSERT INTO messages(channel_id,author_id,content,created_at,client_nonce) VALUES($1,$2,$3,$4,$5) ON CONFLICT (channel_id,author_id,client_nonce) DO NOTHING RETURNING id,content,created_at',
+        channel.id,user.id,content,created_at,nonce);
+      const record=inserted??await one(
+        'SELECT id,content,created_at FROM messages WHERE channel_id=$1 AND author_id=$2 AND client_nonce=$3',
+        channel.id,user.id,nonce);
+      if(!record)throw fail(503,'Não foi possível confirmar a mensagem');
+      if(record.content!==content)throw fail(409,'Identificador já usado em outra mensagem');
+      if(inserted)await notifyChannel(channel.id,channel.server_id);
+      return json(res,inserted?201:200,{message:{
+        id:Number(record.id),content:record.content,created_at:record.created_at,username:user.username
+      },duplicate:!inserted});
     }
     if(m==='POST'&&route==='/api/media/token'){
       const {channel_id}=await body(req);

@@ -6,6 +6,9 @@ export function createV02({db,sessionUser,membership,limit,fail,json,requestBody
     "CREATE TABLE IF NOT EXISTS direct_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, thread_id TEXT NOT NULL REFERENCES direct_threads(id) ON DELETE CASCADE, author_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, content TEXT NOT NULL, created_at TEXT NOT NULL);" +
     "CREATE INDEX IF NOT EXISTS idx_direct_thread_messages ON direct_messages(thread_id,id);" +
     "CREATE INDEX IF NOT EXISTS idx_channel_messages ON messages(channel_id,id);");
+  if(!db.prepare('PRAGMA table_info(direct_messages)').all().some(c=>c.name==='client_nonce'))
+    db.exec('ALTER TABLE direct_messages ADD COLUMN client_nonce TEXT');
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS direct_messages_nonce_idx ON direct_messages(thread_id,author_id,client_nonce)');
   const sockets=new Map();
   const wss=new WebSocketServer({noServer:true,maxPayload:4096,perMessageDeflate:false});
   const sha=x=>createHash('sha256').update(x).digest('hex');
@@ -88,13 +91,24 @@ export function createV02({db,sessionUser,membership,limit,fail,json,requestBody
         json(res,200,{messages:rows});return true;
       }
       limit(req,'message',120);
-      const content=bodyText(await requestBody(req)),created_at=now();
-      const r=db.prepare('INSERT INTO direct_messages(thread_id,author_id,content,created_at) VALUES (?,?,?,?)')
-        .run(t.id,user.id,content,created_at);
-      const target=t.user_a===user.id?t.user_b:t.user_a;
-      send(target,{type:'dm.message',thread_id:t.id});
-      send(user.id,{type:'dm.message',thread_id:t.id});
-      json(res,201,{message:{id:Number(r.lastInsertRowid),content,created_at,username:user.username}});return true;
+      const payload=await requestBody(req);
+      const content=bodyText(payload),nonce=payload.client_nonce??null,created_at=now();
+      if(nonce!==null&&(typeof nonce!=='string'||!/^[a-f0-9]{32}$/.test(nonce)))
+        throw fail(400,'Identificador de mensagem inválido');
+      const inserted=db.prepare('INSERT INTO direct_messages(thread_id,author_id,content,created_at,client_nonce) VALUES (?,?,?,?,?) ON CONFLICT(thread_id,author_id,client_nonce) DO NOTHING RETURNING id,content,created_at')
+        .get(t.id,user.id,content,created_at,nonce);
+      const record=inserted??db.prepare('SELECT id,content,created_at FROM direct_messages WHERE thread_id=? AND author_id=? AND client_nonce=?')
+        .get(t.id,user.id,nonce);
+      if(!record)throw fail(503,'Não foi possível confirmar a mensagem');
+      if(record.content!==content)throw fail(409,'Identificador já usado em outra mensagem');
+      if(inserted){
+        const target=t.user_a===user.id?t.user_b:t.user_a;
+        send(target,{type:'dm.message',thread_id:t.id});
+        send(user.id,{type:'dm.message',thread_id:t.id});
+      }
+      json(res,inserted?201:200,{message:{
+        id:Number(record.id),content:record.content,created_at:record.created_at,username:user.username
+      },duplicate:!inserted});return true;
     }
     const members=/^\/api\/servers\/([a-f0-9-]+)\/members$/.exec(path);
     if(members&&method==='GET') {
