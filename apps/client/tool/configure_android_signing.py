@@ -14,7 +14,7 @@ def main():
     missing = [name for name in required if not os.environ.get(name)]
     if missing:
         raise RuntimeError("Missing Android signing variables: " + ", ".join(missing))
-    keystore = Path(os.environ["VEYLOR_KEYSTORE_PATH"])
+    keystore = Path("android/app") / os.environ["VEYLOR_KEYSTORE_PATH"]
     if not keystore.is_file():
         raise RuntimeError("Android signing keystore not found")
     gradle = Path("android/app/build.gradle.kts")
