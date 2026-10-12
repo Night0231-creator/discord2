@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "platform": "android",
+  "channel": "beta",
+  "version": "0.2.0",
+  "build": 2,
+  "title": "Veylor V0.2 — APK de teste",
+  "notes": "Mensagens, canais, DMs e notificações em tempo real. Acesso ao download exige login na conta GitHub autorizada.",
+  "download_url": "https://github.com/Night0231-creator/discord2/actions/runs/38262623141",
+  "distribution": "github_actions_private",
+  "installation": "manual",
+  "mandatory": false
+}

@@ -3,6 +3,9 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'update_service.dart';
 import 'api_endpoint.dart';
 
 void main() => runApp(const VeylorApp());
@@ -51,12 +54,12 @@ class Home extends StatefulWidget {
   State<Home> createState()=>_HomeState();
 }
 class _HomeState extends State<Home> {
-  final api=Api(const String.fromEnvironment('VEYLOR_API_URL',defaultValue:'http://127.0.0.1:8080'));
+  final api=Api(const String.fromEnvironment('VEYLOR_API_URL',defaultValue:'https://veylor-v02-api.onrender.com'));
   final user=TextEditingController(),password=TextEditingController(),message=TextEditingController();
   Timer? polling,retrySocket;
   WebSocket? socket;
   final storage=const FlutterSecureStorage();
-  bool restoring=true,realtime=false;
+  bool restoring=true,realtime=false,checkingUpdate=false;
   String? nick,serverId,channelId,dmId,error;
   List<Map<String,dynamic>> dms=[];
   bool signup=false,busy=false;
@@ -83,7 +86,55 @@ class _HomeState extends State<Home> {
     }catch(_){
       api.token=null;
       try{await storage.delete(key:'veylor_session');}catch(_){}
-    }finally{if(mounted)setState(()=>restoring=false);}
+    }finally{
+      if(mounted){
+        setState(()=>restoring=false);
+        if(Platform.isAndroid){
+          WidgetsBinding.instance.addPostFrameCallback((_){
+            if(mounted)checkForUpdates(silent:true);
+          });
+        }
+      }
+    }
+  }
+  Future<void> checkForUpdates({bool silent=false}) async {
+    if(!Platform.isAndroid || checkingUpdate)return;
+    checkingUpdate=true;
+    try {
+      final response=await api.request('GET','/api/updates/android');
+      final update=AndroidUpdate.fromJson(response);
+      final installed=await PackageInfo.fromPlatform();
+      final currentBuild=int.tryParse(installed.buildNumber)??0;
+      if(!mounted)return;
+      if(!update.isNewerThan(currentBuild)){
+        if(!silent)ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content:Text('Você está usando a versão mais recente deste canal beta.')));
+        return;
+      }
+      await showDialog<void>(context:context,builder:(dialogContext)=>AlertDialog(
+        title:Text('Veylor ${update.version} disponível'),
+        content:Column(mainAxisSize:MainAxisSize.min,crossAxisAlignment:CrossAxisAlignment.start,children:[
+          Text('Nova compilação ${update.build}. Atual: ${installed.version} (${installed.buildNumber}).'),
+          const SizedBox(height:12),Text(update.notes),
+          const SizedBox(height:12),
+          const Text('O download é pelo GitHub privado: faça login na conta autorizada. '
+            'APKs de teste podem ter assinaturas diferentes; nesse caso será necessário '
+            'desinstalar a versão antiga e entrar novamente.',style:TextStyle(fontSize:12)),
+        ]),
+        actions:[
+          TextButton(onPressed:()=>Navigator.of(dialogContext).pop(),
+            child:const Text('Depois')),
+          FilledButton(onPressed:() async {
+            Navigator.of(dialogContext).pop();
+            final success=await launchUrl(update.downloadUrl,mode:LaunchMode.externalApplication);
+            if(!success&&mounted)ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content:Text('Não foi possível abrir o GitHub.')));
+          },child:const Text('Abrir download'))
+        ]));
+    }catch(e){
+      if(!silent&&mounted)ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content:Text('Falha ao verificar atualização: $e')));
+    }finally{checkingUpdate=false;}
   }
   Future<void> configureBackend() async {
     final controller=TextEditingController(text:api.baseUrl);
@@ -367,6 +418,10 @@ class _HomeState extends State<Home> {
         ListTile(dense:true,leading:const Icon(Icons.volume_up_outlined,size:18),
           title:Text(c['name'] as String),onTap:()=>voice(c)),
       const Spacer(),
+      if(Platform.isAndroid)ListTile(
+        leading:const Icon(Icons.system_update_alt),
+        title:const Text('Verificar atualização'),
+        onTap:()=>checkForUpdates()),
       ListTile(leading:const Icon(Icons.groups_2_outlined),title:const Text('Membros'),onTap:manageMembers),
       Container(color:sidebar,child:ListTile(
         leading:const CircleAvatar(backgroundColor:accent,child:Icon(Icons.person)),
@@ -431,6 +486,9 @@ class _HomeState extends State<Home> {
           onPressed:busy?null:configureBackend,
           icon:const Icon(Icons.dns_outlined,size:17),
           label:Text('Servidor: ${api.baseUrl}',overflow:TextOverflow.ellipsis,maxLines:1)),
+        if(Platform.isAndroid)TextButton.icon(
+          onPressed:()=>checkForUpdates(),icon:const Icon(Icons.system_update_alt,size:18),
+          label:const Text('Verificar atualização do app')),
         const SizedBox(height:10),
         TextField(controller:user,decoration:const InputDecoration(labelText:'Usuário')),
         const SizedBox(height:14),

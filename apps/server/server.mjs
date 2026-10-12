@@ -4,8 +4,11 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readFileSync } from 'node:fs';
 import { createV02 } from './v02.mjs';
 
+// Public update metadata points only to already-built, manually verified beta artifacts.
+const androidRelease = JSON.parse(readFileSync(new URL('./mobile-release.json', import.meta.url),'utf8'));
 const port = Number(process.env.PORT || 8080);
 const host = process.env.HOST || '127.0.0.1';
 const databaseFile = path.resolve(process.env.VEYLOR_DB_PATH || './data/veylor.sqlite');
@@ -119,6 +122,7 @@ export const app = http.createServer(async (req,res) => {
     const pathname = uri.pathname;
     const method = req.method;
     if (method==='GET' && pathname==='/health') return json(res,200,{status:'ok',app:'Veylor'});
+    if (method==='GET' && pathname==='/api/updates/android') return json(res,200,androidRelease);
     if (method==='POST' && pathname==='/api/register') {
       limit(req,'auth',10);
       const {username,password} = await requestBody(req);
