@@ -1,2 +1,0 @@
-# discord2
-discord
