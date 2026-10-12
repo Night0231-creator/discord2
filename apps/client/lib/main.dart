@@ -54,12 +54,12 @@ class Home extends StatefulWidget {
   State<Home> createState()=>_HomeState();
 }
 class _HomeState extends State<Home> {
-  final api=Api(const String.fromEnvironment('VEYLOR_API_URL',defaultValue:'https://veylor-v02-api.onrender.com'));
+  final api=Api(const String.fromEnvironment('VEYLOR_API_URL',defaultValue:'https://veylor-postgres-staging.onrender.com'));
   final user=TextEditingController(),password=TextEditingController(),message=TextEditingController();
   Timer? polling,retrySocket;
   WebSocket? socket;
   final storage=const FlutterSecureStorage();
-  bool restoring=true,realtime=false,checkingUpdate=false;
+  bool restoring=true,realtime=false,checkingUpdate=false,sessionMoved=false;
   String? nick,serverId,channelId,dmId,error;
   List<Map<String,dynamic>> dms=[];
   bool signup=false,busy=false;
@@ -75,9 +75,15 @@ class _HomeState extends State<Home> {
   Future<void> restoreSession() async {
     try {
       final savedAddress=await storage.read(key:'veylor_api_url').timeout(const Duration(seconds:6));
-      if(savedAddress!=null) api.baseUrl=validateApiEndpoint(savedAddress);
+      final selection=selectStartupServer(savedAddress,defaultAddress:api.baseUrl);
+      api.baseUrl=selection.address;
       final saved=await storage.read(key:'veylor_session').timeout(const Duration(seconds:6));
-      if(saved!=null&&saved.isNotEmpty){
+      if(selection.clearOldSession){
+        sessionMoved=selection.movedFromLegacy && saved!=null && saved.isNotEmpty;
+        await storage.delete(key:'veylor_session');
+        await storage.write(key:'veylor_api_url',value:selection.address);
+      }
+      if(!selection.clearOldSession&&saved!=null&&saved.isNotEmpty){
         api.token=saved;
         final profile=await api.request('GET','/api/me');
         nick=(profile['user'] as Map<String,dynamic>)['username'] as String;
@@ -425,7 +431,7 @@ class _HomeState extends State<Home> {
       ListTile(leading:const Icon(Icons.groups_2_outlined),title:const Text('Membros'),onTap:manageMembers),
       Container(color:sidebar,child:ListTile(
         leading:const CircleAvatar(backgroundColor:accent,child:Icon(Icons.person)),
-        title:Text(nick??'Conta'),subtitle:Text(realtime?'V0.2 • Online':'V0.2 • Reconectando'),
+        title:Text(nick??'Conta'),subtitle:Text(realtime?'V0.3 • Online':'V0.3 • Reconectando'),
         trailing:IconButton(tooltip:'Sair',icon:const Icon(Icons.logout),onPressed:() async {
           polling?.cancel();retrySocket?.cancel();
           try{await api.request('POST','/api/logout');}catch(_){}
@@ -490,6 +496,11 @@ class _HomeState extends State<Home> {
           onPressed:()=>checkForUpdates(),icon:const Icon(Icons.system_update_alt,size:18),
           label:const Text('Verificar atualização do app')),
         const SizedBox(height:10),
+        if(sessionMoved)const Padding(
+          padding:EdgeInsets.only(bottom:10),
+          child:Text('Mudamos para um banco novo e seguro. Crie uma conta para começar. '
+            'O login anterior não foi transferido.',
+            textAlign:TextAlign.center,style:TextStyle(color:Colors.amberAccent,fontSize:12))),
         TextField(controller:user,decoration:const InputDecoration(labelText:'Usuário')),
         const SizedBox(height:14),
         TextField(controller:password,obscureText:true,
@@ -502,7 +513,7 @@ class _HomeState extends State<Home> {
         if(error!=null)Text(error!,textAlign:TextAlign.center,
           style:const TextStyle(color:Colors.orangeAccent)),
         const SizedBox(height:12),
-        const Text('Veylor V0.2 • DMs, WebSocket e permissões',textAlign:TextAlign.center)
+        const Text('Veylor V0.3 • PostgreSQL, DMs e tempo real',textAlign:TextAlign.center)
       ]))));
   @override
   Widget build(BuildContext context){
