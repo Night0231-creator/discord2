@@ -213,8 +213,11 @@ class _HomeState extends State<Home> {
       channelId=null;
       for(final c in channels){if(c['type']=='text'){channelId=c['id'] as String;break;}}
     }
-    cursor=0; messages=[];
-    if(dmId==null)await refresh();
+    // Preserve currently displayed messages when membership/channel metadata changes.
+    if(dmId==null&&(messages.isEmpty||!channels.any((c)=>c['id']==channelId))) {
+      cursor=0;messages=[];
+      await refresh();
+    }
     if(mounted)setState((){});
   }
   Future<void> refresh() async {
