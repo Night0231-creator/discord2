@@ -3,6 +3,7 @@ import { randomBytes, createHash, createHmac, scryptSync, timingSafeEqual, rando
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
+import { createV02 } from './v02.mjs';
 
 const port = Number(process.env.PORT || 8080);
 const host = process.env.HOST || '127.0.0.1';
@@ -109,6 +110,8 @@ const mediaToken = (user, room) => {
   return unsigned + '.' + createHmac('sha256', process.env.LIVEKIT_API_SECRET).update(unsigned).digest('base64url');
 };
 
+const v02 = createV02({ db, sessionUser, membership, limit, fail, json, requestBody, now });
+
 export const app = http.createServer(async (req,res) => {
   try {
     const uri = new URL(req.url || '/', 'http://localhost');
@@ -142,10 +145,12 @@ export const app = http.createServer(async (req,res) => {
     }
 
     const user=sessionUser(req);
+    if (await v02.route(req,res,user,pathname,method,uri)) return;
     if (method==='GET' && pathname==='/api/me') return json(res,200,{user});
     if (method==='POST' && pathname==='/api/logout') {
       const token=req.headers.authorization.slice(7);
       db.prepare('DELETE FROM sessions WHERE token_hash=?').run(sha256(token));
+      v02.disconnectToken(token);
       return json(res,200,{ok:true});
     }
     if (method==='GET' && pathname==='/api/servers') {
@@ -180,6 +185,7 @@ export const app = http.createServer(async (req,res) => {
       const invite=db.prepare('SELECT * FROM invites WHERE code=? AND expires_at>?').get(inviteJoin[1],Date.now());
       if (!invite) throw fail(404,'Convite inválido ou expirado');
       db.prepare('INSERT OR IGNORE INTO members(server_id,user_id,role) VALUES (?,?,?)').run(invite.server_id,user.id,'member');
+      v02.notifyServer(invite.server_id);
       return json(res,200,{server_id:invite.server_id});
     }
     const messages=/^\/api\/channels\/([a-f0-9-]+)\/messages$/.exec(pathname);
@@ -201,6 +207,7 @@ export const app = http.createServer(async (req,res) => {
         throw fail(400,'Mensagem inválida (máximo 4000 caracteres)');
       const result=db.prepare('INSERT INTO messages(channel_id,author_id,content,created_at) VALUES (?,?,?,?)')
         .run(channel.id,user.id,content.trim(),now());
+      v02.notifyChannel(channel.id, channel.server_id);
       return json(res,201,{message:{id:Number(result.lastInsertRowid),content:content.trim(),username:user.username,created_at:now()}});
     }
     if (method==='POST' && pathname==='/api/media/token') {
@@ -220,6 +227,8 @@ export const app = http.createServer(async (req,res) => {
     if(!res.headersSent) json(res,status,{error:status===500?'Erro interno do servidor':error.message});
   }
 });
+
+v02.attach(app);
 
 if (process.argv[1] && path.resolve(process.argv[1])===path.resolve(new URL(import.meta.url).pathname)) {
   app.listen(port,host,()=>console.log(`Veylor API ouvindo em http://${host}:${port}`));
