@@ -36,6 +36,14 @@ try {
     Invoke-Checked "flutter" @("config", "--enable-windows-desktop")
     Invoke-Checked "flutter" @("create", "--project-name", "veylor", "--platforms=windows", ".")
     Invoke-Checked "flutter" @("pub", "get")
+    # Remove only the known Flutter-generated MyApp counter test (not Veylor tests).
+    $generatedTest = Join-Path $clientRoot "test\widget_test.dart"
+    if (Test-Path $generatedTest) {
+        $generatedContent = Get-Content $generatedTest -Raw
+        if ($generatedContent -match 'pumpWidget\(const MyApp\(') {
+            Remove-Item $generatedTest -Force
+        }
+    }
     Invoke-Checked "flutter" @("analyze", "--no-fatal-infos")
     # Do not run Flutter's generated counter-app test; run all real app tests.
     $testFiles = @(Get-ChildItem -Path (Join-Path $clientRoot "test") -Filter "*_test.dart" |
