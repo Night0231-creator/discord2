@@ -1,7 +1,6 @@
 name: Veylor V0.2 preview builds
 on:
-  push:
-    branches: [feature/veylor-v0.2]
+  pull_request:
     paths:
       - "apps/client/**"
       - ".github/workflows/preview-builds.yml"
@@ -9,7 +8,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: veylor-v02-preview
+  group: preview-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   windows:
