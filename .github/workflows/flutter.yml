@@ -20,3 +20,6 @@ jobs:
         working-directory: apps/client
       - run: flutter test
         working-directory: apps/client
+      - name: Test safe Android signing configuration
+        run: python3 -m unittest discover -s tool -p 'test_*.py'
+        working-directory: apps/client
