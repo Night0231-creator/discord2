@@ -95,7 +95,7 @@ class _HomeState extends State<Home> {
     }finally{
       if(mounted){
         setState(()=>restoring=false);
-        if(Platform.isAndroid){
+        if(Platform.isAndroid||Platform.isWindows){
           WidgetsBinding.instance.addPostFrameCallback((_){
             if(mounted)checkForUpdates(silent:true);
           });
@@ -104,11 +104,13 @@ class _HomeState extends State<Home> {
     }
   }
   Future<void> checkForUpdates({bool silent=false}) async {
-    if(!Platform.isAndroid || checkingUpdate)return;
+    if((!Platform.isAndroid&&!Platform.isWindows) || checkingUpdate)return;
     checkingUpdate=true;
     try {
-      final response=await api.request('GET','/api/updates/android');
-      final update=AndroidUpdate.fromJson(response);
+      final isAndroid=Platform.isAndroid;
+      final response=await api.request('GET',isAndroid?'/api/updates/android':'/api/updates/windows');
+      final AppUpdateInfo update=isAndroid
+          ? AndroidUpdate.fromJson(response) : WindowsUpdate.fromJson(response);
       final installed=await PackageInfo.fromPlatform();
       final currentBuild=int.tryParse(installed.buildNumber)??0;
       if(!mounted)return;
@@ -123,9 +125,13 @@ class _HomeState extends State<Home> {
           Text('Nova compilação ${update.build}. Atual: ${installed.version} (${installed.buildNumber}).'),
           const SizedBox(height:12),Text(update.notes),
           const SizedBox(height:12),
-          const Text('O download é pelo GitHub privado: faça login na conta autorizada. '
-            'APKs de teste podem ter assinaturas diferentes; nesse caso será necessário '
-            'desinstalar a versão antiga e entrar novamente.',style:TextStyle(fontSize:12)),
+          Text(Platform.isAndroid
+            ? 'O download exige acesso ao GitHub privado. APKs de teste podem ter '
+              'assinaturas diferentes e exigir reinstalação.'
+            : 'O instalador abre a página oficial do GitHub privado. A instalação '
+              'é manual, não executamos arquivos remotamente. O Windows pode '
+              'mostrar um alerta por falta de assinatura digital.',
+            style:const TextStyle(fontSize:12)),
         ]),
         actions:[
           TextButton(onPressed:()=>Navigator.of(dialogContext).pop(),
@@ -424,7 +430,7 @@ class _HomeState extends State<Home> {
         ListTile(dense:true,leading:const Icon(Icons.volume_up_outlined,size:18),
           title:Text(c['name'] as String),onTap:()=>voice(c)),
       const Spacer(),
-      if(Platform.isAndroid)ListTile(
+      if(Platform.isAndroid||Platform.isWindows)ListTile(
         leading:const Icon(Icons.system_update_alt),
         title:const Text('Verificar atualização'),
         onTap:()=>checkForUpdates()),
@@ -492,7 +498,7 @@ class _HomeState extends State<Home> {
           onPressed:busy?null:configureBackend,
           icon:const Icon(Icons.dns_outlined,size:17),
           label:Text('Servidor: ${api.baseUrl}',overflow:TextOverflow.ellipsis,maxLines:1)),
-        if(Platform.isAndroid)TextButton.icon(
+        if(Platform.isAndroid||Platform.isWindows)TextButton.icon(
           onPressed:()=>checkForUpdates(),icon:const Icon(Icons.system_update_alt,size:18),
           label:const Text('Verificar atualização do app')),
         const SizedBox(height:10),
