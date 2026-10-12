@@ -10,6 +10,7 @@ import {attachRealtime,disconnectToken,notifyServer,notifyChannel} from './pg-re
 import {extraRoutes} from './pg-routes.mjs';
 
 const release=JSON.parse(readFileSync(new URL('./mobile-release.json',import.meta.url),'utf8'));
+const windowsRelease=JSON.parse(readFileSync(new URL('./windows-release.json',import.meta.url),'utf8'));
 export const app=http.createServer(async(req,res)=>{
   try{
     const url=new URL(req.url||'/','http://localhost'),route=url.pathname,m=req.method;
@@ -18,6 +19,7 @@ export const app=http.createServer(async(req,res)=>{
       return json(res,200,{status:'ok',app:'Veylor',storage:'postgres'});
     }
     if(m==='GET'&&route==='/api/updates/android')return json(res,200,release);
+    if(m==='GET'&&route==='/api/updates/windows')return json(res,200,windowsRelease);
     if(m==='POST'&&route==='/api/register'){
       limit(req,'auth',10);
       const {username,password}=await body(req);
