@@ -60,6 +60,14 @@ test('Postgres: accounts, membership, DMs, realtime, persistence across restart'
   const ev=[];ws.on('message',d=>ev.push(JSON.parse(String(d))));
   const msg=await api('/api/channels/'+textChannel+'/messages','POST',alice.token,{content:'saved-postgres'});
   assert.equal(msg.status,201);
+  const nonce='abcd1234abcd1234abcd1234abcd1234';
+  const once=await api('/api/channels/'+textChannel+'/messages','POST',alice.token,{content:'retry-safe',client_nonce:nonce});
+  const repeated=await api('/api/channels/'+textChannel+'/messages','POST',alice.token,{content:'retry-safe',client_nonce:nonce});
+  assert.equal(once.status,201);
+  assert.equal(repeated.status,200);
+  assert.equal(repeated.message.id,once.message.id);
+  assert.equal(repeated.duplicate,true);
+  assert.equal((await api('/api/channels/'+textChannel+'/messages','POST',alice.token,{content:'other payload',client_nonce:nonce})).status,409);
   const read=await api('/api/channels/'+textChannel+'/messages','GET',bob.token);
   assert.equal(read.messages[0].content,'saved-postgres');
   await new Promise(r=>setTimeout(r,100));
@@ -68,6 +76,12 @@ test('Postgres: accounts, membership, DMs, realtime, persistence across restart'
   const dm=await api('/api/dms','POST',bob.token,{username:'a_'+suffix});
   assert.equal(dm.status,200);
   assert.equal((await api('/api/dms/'+dm.thread.id+'/messages','POST',alice.token,{content:'private-pg'})).status,201);
+  const dmNonce='abcd1234abcd1234abcd1234abcd0001';
+  const initialDm=await api('/api/dms/'+dm.thread.id+'/messages','POST',alice.token,{content:'safe private retry',client_nonce:dmNonce});
+  const repeatDm=await api('/api/dms/'+dm.thread.id+'/messages','POST',alice.token,{content:'safe private retry',client_nonce:dmNonce});
+  assert.equal(initialDm.status,201);
+  assert.equal(repeatDm.status,200);
+  assert.equal(initialDm.message.id,repeatDm.message.id);
   assert.equal((await api('/api/dms/'+dm.thread.id+'/messages','GET',bob.token)).messages[0].content,'private-pg');
   assert.equal((await api('/api/dms/'+dm.thread.id+'/messages','GET',third.token)).status,403);
   const role=await api('/api/servers/'+alice.server.id+'/members/'+bob.user.id,'PATCH',alice.token,{role:'moderator'});
