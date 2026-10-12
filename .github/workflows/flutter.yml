@@ -18,5 +18,5 @@ jobs:
         working-directory: apps/client
       - run: flutter analyze --no-fatal-infos
         working-directory: apps/client
-      - run: flutter test test/smoke_test.dart
+      - run: flutter test
         working-directory: apps/client

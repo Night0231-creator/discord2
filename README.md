@@ -37,3 +37,19 @@ No Linux use `-d linux`. No Android/iOS configure endereço HTTPS acessível pel
 **Segurança:** backend local para desenvolvimento. Sessões são armazenadas em Secure Storage no cliente, não em texto simples. Para disponibilização pública ainda faltam infraestrutura HTTPS/WSS, rate limit distribuído, controle de abuso e monitoramento. Mantenha LIVEKIT_API_SECRET somente no servidor.
 
 Veja [arquitetura](docs/ARCHITECTURE.md).
+
+## V0.2 Preview - teste multiplataforma
+
+Os três pacotes são gerados pelo workflow [Veylor V0.2 preview builds](https://github.com/Night0231-creator/discord2/actions) na branch `feature/veylor-v0.2`.
+
+- Windows x64: `Veylor-v0.2-Windows-x64.zip` com executável **e DLLs** (extraia o ZIP inteiro).
+- Linux x64: `Veylor-v0.2-Linux-x64.tar.gz` contendo o bundle portátil.
+- Android: `Veylor-v0.2-Android-debug` com `app-debug.apk`. Somente para testes, não Play Store.
+
+Depois de um workflow bem-sucedido, use **Artifacts** na página da execução (conta GitHub com acesso ao repositório privado). Prazo de retenção de 7 dias. Builds não incluem servidor de mídia nem um backend hospedado.
+
+Para conversar entre dispositivos: execute a API Node num host compartilhado e coloque-a atrás de HTTPS, entre no app > **Servidor** e digite sua URL `https://...` antes de fazer login. O aplicativo não envia tokens por HTTP remoto; somente `http://127.0.0.1` e `localhost` são permitidos para desenvolvimento. 
+
+Se precisar testar via HTTP na LAN, a aplicação deve ser recompilada explicitamente com `--dart-define=ALLOW_INSECURE_DEV_API=true`, e a plataforma pode exigir configuração de tráfego não criptografado. Não utilize isso em produção.
+
+O iOS exige Mac/Xcode e assinatura e **não** faz parte destes 3 pacotes.

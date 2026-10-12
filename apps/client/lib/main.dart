@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'api_endpoint.dart';
 
 void main() => runApp(const VeylorApp());
 const accent = Color(0xFF7565EE);
@@ -11,7 +12,7 @@ const sidebar = Color(0xFF15161B);
 
 class Api {
   Api(this.baseUrl);
-  final String baseUrl;
+  String baseUrl;
   String? token;
   Future<Map<String,dynamic>> request(String method, String route, [Map<String,dynamic>? body]) async {
     final client = HttpClient()..connectionTimeout = const Duration(seconds: 10);
@@ -68,7 +69,9 @@ class _HomeState extends State<Home> {
   }
   Future<void> restoreSession() async {
     try {
-      final saved=await storage.read(key:'veylor_session');
+      final savedAddress=await storage.read(key:'veylor_api_url').timeout(const Duration(seconds:6));
+      if(savedAddress!=null) api.baseUrl=validateApiEndpoint(savedAddress);
+      final saved=await storage.read(key:'veylor_session').timeout(const Duration(seconds:6));
       if(saved!=null&&saved.isNotEmpty){
         api.token=saved;
         final profile=await api.request('GET','/api/me');
@@ -79,6 +82,32 @@ class _HomeState extends State<Home> {
       api.token=null;
       try{await storage.delete(key:'veylor_session');}catch(_){}
     }finally{if(mounted)setState(()=>restoring=false);}
+  }
+  Future<void> configureBackend() async {
+    final controller=TextEditingController(text:api.baseUrl);
+    final address=await showDialog<String>(context:context,builder:(ctx)=>AlertDialog(
+      title:const Text('Servidor Veylor'),
+      content:Column(mainAxisSize:MainAxisSize.min,crossAxisAlignment:CrossAxisAlignment.start,children:[
+        const Text('Informe o endereço HTTPS do servidor. HTTP só é permitido localmente.'),
+        const SizedBox(height:12),
+        TextField(controller:controller,autofocus:true,keyboardType:TextInputType.url,
+          decoration:const InputDecoration(labelText:'URL da API',hintText:'https://api.exemplo.com')),
+      ]),
+      actions:[
+        TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Cancelar')),
+        FilledButton(onPressed:()=>Navigator.pop(ctx,controller.text),child:const Text('Salvar'))
+      ]));
+    controller.dispose();
+    if(address==null)return;
+    try {
+      final normalized=validateApiEndpoint(address);
+      if(normalized!=api.baseUrl){
+        api.token=null;
+        await storage.delete(key:'veylor_session');
+        await storage.write(key:'veylor_api_url',value:normalized);
+        if(mounted)setState(() {api.baseUrl=normalized;error=null;});
+      }
+    }catch(e){if(mounted)setState(()=>error=e.toString());}
   }
   void startRealtime(){
     polling?.cancel();
@@ -189,6 +218,7 @@ class _HomeState extends State<Home> {
     finally {if(mounted)setState(()=>busy=false);}
   }
   Future<void> authenticate()=>perform(() async {
+    api.baseUrl=validateApiEndpoint(api.baseUrl);
     final data=await api.request('POST',signup?'/api/register':'/api/login',
       {'username':user.text.trim(),'password':password.text});
     api.token=data['token'] as String;
@@ -394,7 +424,12 @@ class _HomeState extends State<Home> {
         const SizedBox(height:20),
         Text(signup?'Criar conta Veylor':'Bem-vindo ao Veylor',
           textAlign:TextAlign.center,style:const TextStyle(fontSize:27,fontWeight:FontWeight.bold)),
-        const SizedBox(height:24),
+        const SizedBox(height:14),
+        TextButton.icon(
+          onPressed:busy?null:configureBackend,
+          icon:const Icon(Icons.dns_outlined,size:17),
+          label:Text('Servidor: ${api.baseUrl}',overflow:TextOverflow.ellipsis,maxLines:1)),
+        const SizedBox(height:10),
         TextField(controller:user,decoration:const InputDecoration(labelText:'Usuário')),
         const SizedBox(height:14),
         TextField(controller:password,obscureText:true,

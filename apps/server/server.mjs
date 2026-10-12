@@ -3,6 +3,7 @@ import { randomBytes, createHash, createHmac, scryptSync, timingSafeEqual, rando
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createV02 } from './v02.mjs';
 
 const port = Number(process.env.PORT || 8080);
@@ -230,6 +231,6 @@ export const app = http.createServer(async (req,res) => {
 
 v02.attach(app);
 
-if (process.argv[1] && path.resolve(process.argv[1])===path.resolve(new URL(import.meta.url).pathname)) {
+if (process.argv[1] && path.resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
   app.listen(port,host,()=>console.log(`Veylor API ouvindo em http://${host}:${port}`));
 }
