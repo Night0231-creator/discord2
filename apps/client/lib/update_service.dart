@@ -1,51 +1,76 @@
-/// Version metadata uses authenticated GitHub pages, never arbitrary binaries.
-/// It never downloads, executes, or silently installs a remote file.
+/// Beta update information. Never downloads or executes binaries automatically.
 abstract class AppUpdateInfo {
+  const AppUpdateInfo();
+
   String get version;
   int get build;
   String get notes;
   Uri get downloadUrl;
+
   bool isNewerThan(int installedBuild) => build > installedBuild;
 }
 
-/// Android beta update metadata. All links are checked before being opened.
-class AndroidUpdate extends AppUpdateInfo {
-  const AndroidUpdate({required this.version,required this.build,required this.notes,required this.downloadUrl});
+/// Only opens authenticated pages in the project's official private GitHub repo.
+bool isTrustedVeylorDownload(Uri? uri) {
+  if (uri == null || uri.scheme != 'https' ||
+      uri.host != 'github.com' || uri.userInfo.isNotEmpty ||
+      uri.hasPort || uri.hasQuery || uri.hasFragment) {
+    return false;
+  }
+  return RegExp(
+    r'^/Night0231-creator/discord2/(?:actions/runs/[0-9]+|releases/tag/v[0-9]+\.[0-9]+\.[0-9]+-beta)$',
+  ).hasMatch(uri.path);
+}
 
+bool _validUpdatePayload(Map<String,dynamic> json, String platform, Uri? uri) {
+  final version = json['version'];
+  final build = json['build'];
+  final notes = json['notes'];
+  return json['schema'] == 1 &&
+      json['platform'] == platform &&
+      json['channel'] == 'beta' &&
+      json['installation'] == 'manual' &&
+      version is String &&
+      RegExp(r'^[0-9]+\.[0-9]+\.[0-9]+$').hasMatch(version) &&
+      build is int && build > 0 &&
+      notes is String && notes.length <= 1500 &&
+      isTrustedVeylorDownload(uri);
+}
+
+class AndroidUpdate extends AppUpdateInfo {
+  const AndroidUpdate({
+    required this.version,
+    required this.build,
+    required this.notes,
+    required this.downloadUrl,
+  });
+
+  @override
   final String version;
+  @override
   final int build;
+  @override
   final String notes;
+  @override
   final Uri downloadUrl;
 
   factory AndroidUpdate.fromJson(Map<String,dynamic> json) {
-    final build=json['build'];
-    final version=json['version'];
-    final notes=json['notes'];
-    final source=json['download_url'];
-    final rawUri=source is String ? Uri.tryParse(source) : null;
-
-    if(json['schema']!=1 || json['platform']!='android' ||
-       json['channel']!='beta' || json['installation']!='manual' ||
-       build is! int || build<1 ||
-       version is! String || !RegExp(r'^\d+\.\d+\.\d+$').hasMatch(version) ||
-       notes is! String || notes.length>1500 ||
-       rawUri==null || rawUri.scheme!='https' ||
-       rawUri.host!='github.com' || rawUri.userInfo.isNotEmpty ||
-       rawUri.hasQuery || rawUri.hasFragment || rawUri.hasPort ||
-       !RegExp(r'^/Night0231-creator/discord2/(?:actions/runs/\d+|releases/tag/v\d+\.\d+\.\d+-beta)) {
-      throw const FormatException('Metadados de atualização inválidos');
+    final value = json['download_url'];
+    final url = value is String ? Uri.tryParse(value) : null;
+    if (!_validUpdatePayload(json, 'android', url)) {
+      throw const FormatException('Metadados de atualização Android inválidos');
     }
-    return AndroidUpdate(version:version,build:build,notes:notes,downloadUrl:rawUri);
+    return AndroidUpdate(
+      version: json['version'] as String,
+      build: json['build'] as int,
+      notes: json['notes'] as String,
+      downloadUrl: url!,
+    );
   }
-
-  bool isNewerThan(int installedBuild) => build>installedBuild;
 }
 
-
-/// Beta Windows updates open the official GitHub run or private Release page.
-/// This is a manual installer flow; no executable is downloaded in-app.
 class WindowsUpdate extends AppUpdateInfo {
-  WindowsUpdate({
+  const WindowsUpdate({
     required this.version,
     required this.build,
     required this.notes,
@@ -62,79 +87,16 @@ class WindowsUpdate extends AppUpdateInfo {
   final Uri downloadUrl;
 
   factory WindowsUpdate.fromJson(Map<String,dynamic> json) {
-    final raw=json['download_url'];
-    final parsed=raw is String ? Uri.tryParse(raw) : null;
-    final version=json['version'];
-    final notes=json['notes'];
-    final build=json['build'];
-    final path=parsed?.path??'';
-    final allowedPath=RegExp(
-      r'^/Night0231-creator/discord2/(?:actions/runs/[0-9]+|releases/tag/v[0-9]+\.[0-9]+\.[0-9]+-beta)$'
-    ).hasMatch(path);
-    if(json['schema']!=1 || json['platform']!='windows' ||
-      json['channel']!='beta' || json['installation']!='manual' ||
-      version is! String || !RegExp(r'^\d+\.\d+\.\d+$').hasMatch(version) ||
-      build is! int || build<1 ||
-      notes is! String || notes.length>1500 ||
-      parsed==null || parsed.scheme!='https' ||
-      parsed.host!='github.com' || parsed.userInfo.isNotEmpty ||
-      parsed.hasQuery || parsed.hasFragment || parsed.hasPort ||
-      !allowedPath) {
-      throw const FormatException('Metadados Windows inválidos');
+    final value = json['download_url'];
+    final url = value is String ? Uri.tryParse(value) : null;
+    if (!_validUpdatePayload(json, 'windows', url)) {
+      throw const FormatException('Metadados de atualização Windows inválidos');
     }
-    return WindowsUpdate(version:version,build:build,notes:notes,downloadUrl:parsed);
-  }
-}
-).hasMatch(rawUri.path)) {
-      throw const FormatException('Metadados de atualização inválidos');
-    }
-    return AndroidUpdate(version:version,build:build,notes:notes,downloadUrl:rawUri);
-  }
-
-  bool isNewerThan(int installedBuild) => build>installedBuild;
-}
-
-
-/// Beta Windows updates open the official GitHub run or private Release page.
-/// This is a manual installer flow; no executable is downloaded in-app.
-class WindowsUpdate extends AppUpdateInfo {
-  WindowsUpdate({
-    required this.version,
-    required this.build,
-    required this.notes,
-    required this.downloadUrl,
-  });
-
-  @override
-  final String version;
-  @override
-  final int build;
-  @override
-  final String notes;
-  @override
-  final Uri downloadUrl;
-
-  factory WindowsUpdate.fromJson(Map<String,dynamic> json) {
-    final raw=json['download_url'];
-    final parsed=raw is String ? Uri.tryParse(raw) : null;
-    final version=json['version'];
-    final notes=json['notes'];
-    final build=json['build'];
-    final path=parsed?.path??'';
-    final allowedPath=RegExp(
-      r'^/Night0231-creator/discord2/(?:actions/runs/[0-9]+|releases/tag/v[0-9]+\.[0-9]+\.[0-9]+-beta)$'
-    ).hasMatch(path);
-    if(json['schema']!=1 || json['platform']!='windows' ||
-      json['channel']!='beta' || json['installation']!='manual' ||
-      version is! String || !RegExp(r'^\d+\.\d+\.\d+$').hasMatch(version) ||
-      build is! int || build<1 ||
-      notes is! String || notes.length>1500 ||
-      parsed==null || parsed.scheme!='https' ||
-      parsed.host!='github.com' || parsed.userInfo.isNotEmpty ||
-      parsed.hasQuery || parsed.hasFragment || parsed.hasPort ||
-      !allowedPath) {
-      throw const FormatException('Metadados Windows inválidos');
-    }
-    return WindowsUpdate(version:version,build:build,notes:notes,downloadUrl:parsed);
+    return WindowsUpdate(
+      version: json['version'] as String,
+      build: json['build'] as int,
+      notes: json['notes'] as String,
+      downloadUrl: url!,
+    );
   }
 }
