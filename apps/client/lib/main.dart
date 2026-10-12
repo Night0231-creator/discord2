@@ -346,7 +346,7 @@ class _HomeState extends State<Home> {
           try{await storage.delete(key:'veylor_session');}catch(_){}
           if(mounted)setState((){nick=null;serverId=null;dmId=null;realtime=false;servers=[];channels=[];dms=[];messages=[];});
         })))
-    ]))))
+    ])))
   ]);
   Widget chat() {
     final name=dmId!=null?(dms.where((d)=>d['id']==dmId).map((d)=>d['username'] as String).firstOrNull??'DM'):

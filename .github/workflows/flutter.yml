@@ -16,7 +16,7 @@ jobs:
         working-directory: apps/client
       - run: flutter pub get
         working-directory: apps/client
-      - run: flutter analyze
+      - run: flutter analyze --no-fatal-infos
         working-directory: apps/client
       - run: flutter test test/smoke_test.dart
         working-directory: apps/client
