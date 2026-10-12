@@ -437,7 +437,7 @@ class _HomeState extends State<Home> {
       ListTile(leading:const Icon(Icons.groups_2_outlined),title:const Text('Membros'),onTap:manageMembers),
       Container(color:sidebar,child:ListTile(
         leading:const CircleAvatar(backgroundColor:accent,child:Icon(Icons.person)),
-        title:Text(nick??'Conta'),subtitle:Text(realtime?'V0.3.1 • Online':'V0.3.1 • Reconectando'),
+        title:Text(nick??'Conta'),subtitle:Text(realtime?'V0.3.2 • Online':'V0.3.2 • Reconectando'),
         trailing:IconButton(tooltip:'Sair',icon:const Icon(Icons.logout),onPressed:() async {
           polling?.cancel();retrySocket?.cancel();
           try{await api.request('POST','/api/logout');}catch(_){}
@@ -519,7 +519,7 @@ class _HomeState extends State<Home> {
         if(error!=null)Text(error!,textAlign:TextAlign.center,
           style:const TextStyle(color:Colors.orangeAccent)),
         const SizedBox(height:12),
-        const Text('Veylor V0.3.1 • PostgreSQL, DMs e tempo real',textAlign:TextAlign.center)
+        const Text('Veylor V0.3.2 • PostgreSQL, DMs e tempo real',textAlign:TextAlign.center)
       ]))));
   @override
   Widget build(BuildContext context){
