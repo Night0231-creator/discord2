@@ -23,6 +23,10 @@ CREATE TABLE IF NOT EXISTS members (server_id TEXT NOT NULL REFERENCES servers(i
 CREATE TABLE IF NOT EXISTS channels (id TEXT PRIMARY KEY, server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE, name TEXT NOT NULL, type TEXT NOT NULL CHECK(type IN ('text','voice')));
 CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE, author_id TEXT NOT NULL REFERENCES users(id), content TEXT NOT NULL, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS invites (code TEXT PRIMARY KEY, server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE, created_by TEXT NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL); `);
+// Non-destructive migration for existing local SQLite installations.
+if(!db.prepare('PRAGMA table_info(messages)').all().some(c=>c.name==='client_nonce'))
+  db.exec('ALTER TABLE messages ADD COLUMN client_nonce TEXT');
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS messages_nonce_idx ON messages(channel_id,author_id,client_nonce)');
 const now = () => new Date().toISOString();
 const sha256 = value => createHash('sha256').update(value).digest('hex');
 const passwordHash = password => {
