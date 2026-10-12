@@ -23,7 +23,7 @@ jobs:
       - name: Confirm beta version
         shell: bash
         run: |
-          grep -q '^version: 0.3.3+6$' apps/client/pubspec.yaml
+          grep -q '^version: 0.3.3+7$' apps/client/pubspec.yaml
           grep -q 'AppVersion "0.3.3"' apps/client/windows-installer.iss
           grep -q 'Veylor-v0.3.3-Setup-Windows-x64' .github/workflows/preview-builds.yml
   publish:
@@ -48,7 +48,7 @@ jobs:
             echo "::error::Build run must be an integer"
             exit 1
           fi
-          if [[ "$GITHUB_REF_NAME" != "feature/veylor-v0.3.1-installers" ]]; then
+          if [[ "$GITHUB_REF_NAME" != "feature/veylor-v0.3.3-stability" ]]; then
             echo "::error::Run this beta release only on the validated Veylor installer branch"
             exit 1
           fi
